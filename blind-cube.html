@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>2-Letter Key Quiz</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -22,11 +23,27 @@
     </h1>
     <div class="my-3 flex items-center justify-center gap-4">
       <button
+        v-if="mode == 'study'"
+        @click="mode = 'self'"
+        class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800"
+        title="Force reload from server"
+      >
+        Self Mode
+      </button>
+      <button
+        v-if="mode == 'self'"
+        @click="mode = 'Study'"
+        class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800"
+        title="Force reload from server"
+      >
+        Study Mode
+      </button>
+      <button
         @click="reloadData"
         class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800"
         title="Force reload from server"
       >
-        🔄 Reload
+        🔄 Reload Cache
       </button>
       <button
         @click="hideAll"
@@ -65,6 +82,20 @@
         </div>
       </div>
 
+      <div v-else-if="mode === 'self'">
+        <div class="text-center">
+          <input 
+            class="w-full h-16 p-3 border rounded mt-4 text-center text-lg tracking-wider"
+            type="Type your input"
+            v-model="selfInput"
+          >
+          <button 
+            class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition mt-5"
+            @click="registerInput"
+          >Enter</button>
+        </div>
+      </div>
+
       <!-- Recall Mode -->
       <div v-else-if="mode === 'recall'" class="text-center">
         <textarea
@@ -82,10 +113,17 @@
           </button>
 
           <button
-            v-else
-            @click="reset"
+            v-if="result.length > 0"
+            @click="reset('study')"
             class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 transition">
-            Try New Set
+            Try New Random Set
+          </button>
+
+          <button
+            v-if="result.length > 0"
+            @click="reset('self')"
+            class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 transition">
+            Try New Input
           </button>
         </div>
 
@@ -123,9 +161,10 @@
         const userInput = ref("");
         const result = ref([]);
         const mode = ref("study");
+        const selfInput = ref("");
 
         const CACHE_KEY = "keywordCache";
-        const CACHE_EXPIRY = 8 * 60 * 60 * 1000; // 8 hours
+        const CACHE_EXPIRY = .5 * 60 * 60 * 1000; // 1 hours
 
         const loadFromCache = () => {
           const raw = localStorage.getItem(CACHE_KEY);
@@ -168,7 +207,7 @@
             if (cached) {
               keywordMap.value = cached;
               quizPairs.value = get2LetterPairs(cached);
-              pickRandomSet();
+              pickRandomSet("study");
               loading.value = false;
               return;
             }
@@ -180,7 +219,7 @@
               keywordMap.value = json.data;
               saveToCache(json.data);
               quizPairs.value = get2LetterPairs(json.data);
-              pickRandomSet();
+              pickRandomSet("study");
             }
           } catch (err) {
             console.error("Fetch failed:", err);
@@ -189,7 +228,7 @@
           }
         };
 
-        const pickRandomSet = () => {
+        const pickRandomSet = (newMode) => {
           const selected = [];
           const used = new Set();
           while (selected.length < 9 && used.size < quizPairs.value.length) {
@@ -204,7 +243,7 @@
           revealed.value = Array(selected.length).fill(false);
           userInput.value = "";
           result.value = [];
-          mode.value = "study";
+          mode.value = newMode; 
         };
 
         const startRecall = () => {
@@ -234,12 +273,45 @@
           }));
         };
 
-        const reset = () => pickRandomSet();
+        const reset = (newMode) => pickRandomSet(newMode);
 
         const reloadData = () => {
           loading.value = true;
           fetchKeywordMap(true);
         };
+
+        const registerInput = () => {
+            const input = selfInput.value.trim().toLowerCase();
+            if (!input) return;
+
+            const pairs = [];
+            for (let i = 0; i < input.length; i += 2) {
+                pairs.push(input.slice(i, i + 2));
+            }
+
+            const pairMap = {};
+            quizPairs.value.forEach(item => {
+                pairMap[item.key] = item;
+            });
+
+            const matched = pairs
+                .map(key => {
+                    if (pairMap[key]) {
+                        return pairMap[key];          // existing 2-letter match
+                    } else {
+                        return { key: key, value: key }; // leftover single letter or no match
+                    }
+                })
+
+            currentSet.value = matched;
+            correctKeys.value = currentSet.value.map(i => i.key);
+            revealed.value = Array(currentSet.value.length).fill(false);
+
+            selfInput.value = "";
+            mode.value = "study";
+        };
+
+
 
         onMounted(() => {
           fetchKeywordMap();
@@ -252,12 +324,15 @@
           userInput,
           result,
           mode,
+          selfInput,
+
           startRecall,
           check,
           reset,
           reveal,
           reloadData,
-          hideAll
+          hideAll,
+          registerInput
         };
       }
     }).mount("#app");
