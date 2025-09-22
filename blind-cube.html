@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>2-Letter Key Quiz</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .no-wrap-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+  <div id="app" class="max-w-4xl mx-auto mt-10 p-4">
+    <h1 class="text-2xl font-bold mb-6 text-center flex items-center justify-center gap-4">
+      🫠 2-Letter Key Memorization
+      <button
+        @click="reloadData"
+        class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800"
+        title="Force reload from server"
+      >
+        🔄 Reload
+      </button>
+    </h1>
+
+    <div v-if="loading" class="text-center text-gray-500">Loading...</div>
+
+    <div v-else>
+      <!-- Study Mode -->
+      <div v-if="mode === 'study'">
+        <div class="grid gap-2 no-wrap-grid">
+          <div
+            v-for="(item, index) in currentSet"
+            :key="index"
+            class="bg-white shadow rounded-lg p-2 border border-gray-200 text-center"
+          >
+            <div class="text-lg font-bold uppercase text-gray-800">{{ item.key }}</div>
+            <div v-if="revealed[index]" class="text-sm text-gray-600 mt-1">{{ item.value }}</div>
+            <button
+              v-else
+              @click="reveal(index)"
+              class="bg-blue-100 text-blue-700 text-xs px-2 py-1 mt-2 rounded hover:bg-blue-200 transition"
+            >
+              Reveal
+            </button>
+          </div>
+        </div>
+
+        <div class="text-center mt-6">
+          <button
+            @click="startRecall"
+            class="bg-orange-600 text-white px-6 py-3 rounded hover:bg-orange-700 transition shadow-md">
+            Ready (Hide and Input)
+          </button>
+        </div>
+      </div>
+
+      <!-- Recall Mode -->
+      <div v-else-if="mode === 'recall'" class="text-center">
+        <textarea
+          v-model="userInput"
+          class="w-full h-24 p-3 border rounded mt-4 text-center text-lg tracking-wider"
+          placeholder="Type the 18-letter combined key like abcrgx..."
+        ></textarea>
+
+        <div class="mt-4 space-x-4">
+          <button
+            @click="check"
+            class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">
+            Check
+          </button>
+
+          <button
+            @click="reset"
+            class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 transition">
+            Try New Set
+          </button>
+        </div>
+
+        <div v-if="result.length > 0" class="mt-6 grid gap-2 no-wrap-grid">
+          <div
+            v-for="(pair, index) in result"
+            :key="index"
+            class="p-2 rounded text-center text-white font-bold"
+            :class="pair.correct ? 'bg-green-500' : 'bg-red-500'"
+          >
+            <div class="text-sm">Your:</div>
+            <div class="text-lg tracking-widest">{{ pair.user }}</div>
+            <div class="text-sm mt-1">Answer:</div>
+            <div class="text-lg tracking-widest">{{ pair.actual }}</div>
+            <div class="text-xs mt-1 font-normal text-white/80">{{ pair.value }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp, ref, onMounted } = Vue;
+
+    createApp({
+      setup() {
+        const baseURL = "https://script.google.com/macros/s/AKfycbwkTs-I234XYgnTRPz6NORJxYYurYUaegYO1zoumHzTAulg1mnupw5yDBmGPom6fVDwbA/";
+        const keywordMap = ref({});
+        const loading = ref(true);
+        const quizPairs = ref([]);
+        const currentSet = ref([]);
+        const correctKeys = ref([]);
+        const revealed = ref([]);
+        const userInput = ref("");
+        const result = ref([]);
+        const mode = ref("study");
+
+        const CACHE_KEY = "keywordCache";
+        const CACHE_EXPIRY = 8 * 60 * 60 * 1000; // 8 hours
+
+        const loadFromCache = () => {
+          const raw = localStorage.getItem(CACHE_KEY);
+          if (!raw) return null;
+          try {
+            const parsed = JSON.parse(raw);
+            const now = Date.now();
+            if (now - parsed.timestamp < CACHE_EXPIRY) {
+              return parsed.data;
+            }
+          } catch (e) {
+            console.warn("Cache parsing failed:", e);
+          }
+          return null;
+        };
+
+        const saveToCache = (data) => {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: Date.now() }));
+        };
+
+        const get2LetterPairs = (map) => {
+          const pairs = [];
+          const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+          for (let rowKey in map) {
+            const row = map[rowKey];
+            row.forEach((value, colIndex) => {
+              if (colIndex >= 0 && colIndex < 26) {
+                const secondLetter = alphabet[colIndex];
+                const key = rowKey.toLowerCase() + secondLetter;
+                pairs.push({ key, value });
+              }
+            });
+          }
+          return pairs;
+        };
+
+        const fetchKeywordMap = async (force = false) => {
+          if (!force) {
+            const cached = loadFromCache();
+            if (cached) {
+              keywordMap.value = cached;
+              quizPairs.value = get2LetterPairs(cached);
+              pickRandomSet();
+              loading.value = false;
+              return;
+            }
+          }
+          try {
+            const res = await fetch(`${baseURL}exec?action=getKeywordMap`);
+            const json = await res.json();
+            if (json.success) {
+              keywordMap.value = json.data;
+              saveToCache(json.data);
+              quizPairs.value = get2LetterPairs(json.data);
+              pickRandomSet();
+            }
+          } catch (err) {
+            console.error("Fetch failed:", err);
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        const pickRandomSet = () => {
+          const selected = [];
+          const used = new Set();
+          while (selected.length < 9 && used.size < quizPairs.value.length) {
+            const rand = Math.floor(Math.random() * quizPairs.value.length);
+            if (!used.has(rand)) {
+              selected.push(quizPairs.value[rand]);
+              used.add(rand);
+            }
+          }
+          currentSet.value = selected;
+          correctKeys.value = selected.map(i => i.key);
+          revealed.value = Array(selected.length).fill(false);
+          userInput.value = "";
+          result.value = [];
+          mode.value = "study";
+        };
+
+        const startRecall = () => {
+          mode.value = "recall";
+        };
+
+        const reveal = (index) => {
+          revealed.value[index] = true;
+        };
+
+        const check = () => {
+          const input = userInput.value.trim().toLowerCase();
+          const userKeys = [];
+          for (let i = 0; i < input.length; i += 2) {
+            userKeys.push(input.slice(i, i + 2));
+          }
+          result.value = correctKeys.value.map((correct, i) => ({
+            actual: correct,
+            user: userKeys[i] || "--",
+            correct: userKeys[i] === correct,
+            value: currentSet.value[i]?.value || ""
+          }));
+        };
+
+        const reset = () => pickRandomSet();
+
+        const reloadData = () => {
+          loading.value = true;
+          fetchKeywordMap(true);
+        };
+
+        onMounted(() => {
+          fetchKeywordMap();
+        });
+
+        return {
+          loading,
+          currentSet,
+          revealed,
+          userInput,
+          result,
+          mode,
+          startRecall,
+          check,
+          reset,
+          reveal,
+          reloadData
+        };
+      }
+    }).mount("#app");
+  </script>
+</body>
+</html>
