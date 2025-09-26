@@ -164,7 +164,7 @@
         const selfInput = ref("");
 
         const CACHE_KEY = "keywordCache";
-        const CACHE_EXPIRY = .5 * 60 * 60 * 1000; // 1 hours
+        const CACHE_EXPIRY = 50 * 60 * 60 * 1000; // 1 hours
 
         const loadFromCache = () => {
           const raw = localStorage.getItem(CACHE_KEY);
