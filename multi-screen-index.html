@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>6 Iframes with Aspect Ratio</title>
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+      .custom-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        width: 95vw;
+        margin: auto;
+        gap: 1rem;
+        justify-content: space-between;
+      }
+    </style>
+</head>
+<body class="bg-gray-100 p-6">
+
+    <div id="app">
+        <!-- Single input controls all iframes -->
+        <div class="mb-4">
+            <input 
+                type="text" 
+                v-model="iframeSrc" 
+                @input="saveToLocalStorage"
+                class="border rounded p-2 w-full"
+                placeholder="Enter iframe URL"
+            />
+        </div>
+
+        <!-- Grid of iframes -->
+        <div class="custom-grid">
+            <div v-for="n in 3" :key="n" class="w-full aspect-[1/2.15]">
+                <iframe
+                    :src="iframeSrc"
+                    class="w-full h-full border rounded"
+                ></iframe>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY = "iframeSrc";
+
+        const App = {
+            data() {
+                return {
+                    iframeSrc: "http://localhost:8080/"
+                };
+            },
+            mounted() {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) {
+                    this.iframeSrc = saved;
+                }
+            },
+            methods: {
+                saveToLocalStorage() {
+                    localStorage.setItem(STORAGE_KEY, this.iframeSrc);
+                }
+            }
+        };
+
+        Vue.createApp(App).mount('#app');
+    </script>
+
+</body>
+</html>
