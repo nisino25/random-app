@@ -23,21 +23,23 @@
     </h1>
     <div class="my-3 flex items-center justify-center gap-4">
       <button
-        v-if="mode == 'study'"
-        @click="mode = 'self'"
-        class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800"
-        title="Force reload from server"
-      >
-        Self Mode
+          v-for="m in modes"
+          :key="m"
+          @click="mode = m"
+          :class="[
+              'text-sm px-3 py-1 rounded',
+              mode === m
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-200 hover:bg-gray-300 text-gray-800'
+          ]"
+          >
+          {{ formatLabel(m) }}
       </button>
-      <button
-        v-if="mode == 'self'"
-        @click="mode = 'study'"
-        class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800"
-        title="Force reload from server"
-      >
-        Study Mode
-      </button>
+
+    </div>
+    <hr>
+    <div class="my-3 flex items-center justify-center gap-4">
+      
       <button
         @click="reloadData"
         class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800"
@@ -96,6 +98,21 @@
         </div>
       </div>
 
+      <div v-else-if="mode === 'memory'">
+        <p>Pick options</p>
+        <div class="flex gap-2 flex-wrap justify-center mt-4" v-if="!currentSeletedKey">
+          <button
+              v-for="key in Object.keys(keywordMap)"
+              :key="key"
+              @click="selectCategory(key)"
+              class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800"
+          >
+              {{ key }}
+          </button>
+          <button class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800" @click="pickRandom24">Random 24</button>
+        </div>
+      </div>
+
       <!-- Recall Mode -->
       <div v-else-if="mode === 'recall'" class="text-center">
         <textarea
@@ -151,7 +168,7 @@
 
     createApp({
       setup() {
-        const baseURL = "https://script.google.com/macros/s/AKfycbwkTs-I234XYgnTRPz6NORJxYYurYUaegYO1zoumHzTAulg1mnupw5yDBmGPom6fVDwbA/";
+        const baseURL = "https://script.google.com/macros/s/AKfycbyq0D55cLlQCobLkg6Ma6y7dbCtiGloTz7twl2cxuTxF6s3JCMnsE9qrsXOT2kul0wr5Q/exec";
         const keywordMap = ref({});
         const loading = ref(true);
         const quizPairs = ref([]);
@@ -161,10 +178,14 @@
         const userInput = ref("");
         const result = ref([]);
         const mode = ref("study");
+        const modes = ref(['study', 'self', 'memory'])
+
         const selfInput = ref("");
 
         const CACHE_KEY = "keywordCache";
         const CACHE_EXPIRY = 50 * 60 * 60 * 1000; // 1 hours
+
+        const currentSeletedKey = ref(null)
 
         const loadFromCache = () => {
           const raw = localStorage.getItem(CACHE_KEY);
@@ -209,23 +230,58 @@
               quizPairs.value = get2LetterPairs(cached);
               pickRandomSet("study");
               loading.value = false;
+              console.log(keywordMap.value)
               return;
             }
           }
-          try {
-            const res = await fetch(`${baseURL}exec?action=getKeywordMap`);
-            const json = await res.json();
-            if (json.success) {
-              keywordMap.value = json.data;
-              saveToCache(json.data);
-              quizPairs.value = get2LetterPairs(json.data);
-              pickRandomSet("study");
-            }
-          } catch (err) {
-            console.error("Fetch failed:", err);
-          } finally {
-            loading.value = false;
+          // try {
+          //   const res = await fetch(`${baseURL}exec?action=getKeywordMap`);
+          //   const json = await res.json();
+          //   if (json.success) {
+          //     keywordMap.value = json.data;
+          //     saveToCache(json.data);
+          //     quizPairs.value = get2LetterPairs(json.data);
+          //     pickRandomSet("study");
+          //   }
+          // } catch (err) {
+          //   console.error("Fetch failed:", err);
+          // } finally {
+          //   loading.value = false;
+          // }
+          window.jsonpCallback = (data) => {
+              console.log("API Response:", data)
+
+              try {
+                  if (data.success) {
+                      keywordMap.value = data.data
+                      saveToCache(data.data)
+
+                      quizPairs.value = get2LetterPairs(data.data)
+                      pickRandomSet("study")
+                  } else {
+                      console.error("Error:", data.message)
+                  }
+              } catch (err) {
+                  console.error("Processing failed:", err)
+              } finally {
+                  loading.value = false
+                  console.log("Final keywordMap:", keywordMap.value)
+              }
+
+              delete window.jsonpCallback
           }
+
+          const script = document.createElement("script")
+          script.src = `${baseURL}?action=getKeywordMap&callback=jsonpCallback`
+          console.log(script.src)
+          script.async = true
+
+          document.body.appendChild(script)
+
+          script.onload = () => {
+              document.body.removeChild(script)
+          }
+
         };
 
         const pickRandomSet = (newMode) => {
@@ -311,6 +367,52 @@
             mode.value = "study";
         };
 
+        const formatLabel = (mode) => {
+          currentSeletedKey.value = null;
+            return mode.charAt(0).toUpperCase() + mode.slice(1) + ' Mode'
+        }
+
+        const selectCategory = (key) => {
+            currentSeletedKey.value = key;
+            const category = keywordMap.value[key];
+            if (!category) return;
+
+            const pairs = [];
+            const alphabet = 'abcdefghijklmnopqrstuvwxyz';
+            category.forEach((value, colIndex) => {
+                if (colIndex >= 0 && colIndex < 26) {
+                    const secondLetter = alphabet[colIndex];
+                    const pairKey = key.toLowerCase() + secondLetter;
+                    pairs.push({ key: pairKey, value });
+                }
+            });
+
+            currentSet.value = pairs;
+            correctKeys.value = pairs.map(i => i.key);
+            revealed.value = Array(pairs.length).fill(false);
+            userInput.value = "";
+            result.value = [];
+            mode.value = "study";
+        }
+
+        const pickRandom24 = () => {
+            const selected = [];
+            const used = new Set();
+            while (selected.length < 24 && used.size < quizPairs.value.length) {
+                const rand = Math.floor(Math.random() * quizPairs.value.length);
+                if (!used.has(rand)) {
+                    selected.push(quizPairs.value[rand]);
+                    used.add(rand);
+                }
+            }
+            currentSet.value = selected;
+            correctKeys.value = selected.map(i => i.key);
+            revealed.value = Array(selected.length).fill(false);
+            userInput.value = "";
+            result.value = [];
+            mode.value = "study"; 
+        }
+
 
 
         onMounted(() => {
@@ -323,7 +425,7 @@
           revealed,
           userInput,
           result,
-          mode,
+          
           selfInput,
 
           startRecall,
@@ -332,7 +434,15 @@
           reveal,
           reloadData,
           hideAll,
-          registerInput
+          registerInput,
+
+          mode,
+          formatLabel,
+          modes,
+          keywordMap,
+          currentSeletedKey,
+          selectCategory,
+          pickRandom24
         };
       }
     }).mount("#app");
