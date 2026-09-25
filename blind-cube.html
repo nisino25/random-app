@@ -9,6 +9,64 @@
     .no-wrap-grid {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
+    .cube-net {
+      --s: clamp(18px, 6.5vw, 34px);
+      display: grid;
+      grid-template-columns: repeat(4, auto);
+      gap: 4px;
+      width: max-content;
+    }
+    .cube-face {
+      display: grid;
+      grid-template-columns: repeat(3, var(--s));
+      gap: 2px;
+    }
+    .sticker {
+      width: var(--s);
+      height: var(--s);
+      border-radius: 3px;
+      border: 1px solid rgba(0, 0, 0, 0.35);
+    }
+    .cube-scene {
+      --c: clamp(150px, 45vw, 220px);
+      width: calc(var(--c) * 1.9);
+      height: calc(var(--c) * 1.9);
+      perspective: 900px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: none;
+      cursor: grab;
+      user-select: none;
+    }
+    .cube-scene:active { cursor: grabbing; }
+    .cube-3d {
+      position: relative;
+      width: var(--c);
+      height: var(--c);
+      transform-style: preserve-3d;
+    }
+    .cube-3d-face {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4%;
+      padding: 4%;
+      background: #111;
+      border-radius: 6%;
+      backface-visibility: hidden;
+    }
+    .cube-3d-face > div { border-radius: 10%; font-size: calc(var(--c) / 9); }
+    .sticker-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: calc(var(--s, 20px) * 0.5);
+      color: #111;
+      text-shadow: 0 0 3px #fff, 0 0 3px #fff;
+    }
   </style>
 
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -56,9 +114,16 @@
       </button>
     </div>
 
-    <div v-if="loading" class="text-center text-gray-500">Loading...</div>
+    <div v-if="loading && mode !== 'scramble'" class="text-center text-gray-500">Loading...</div>
 
     <div v-else>
+      <div
+        v-if="memoSession && (mode === 'study' || mode === 'recall')"
+        class="mb-3 text-center text-sm font-semibold text-orange-700 bg-orange-50 border border-orange-200 rounded py-2">
+        🧩 Scramble memo · {{ memoSession.phases[memoSession.index].name }}
+        ({{ memoSession.index + 1 }}/{{ memoSession.phases.length }})
+      </div>
+
       <!-- Study Mode -->
       <div v-if="mode === 'study'">
         <div class="grid gap-2 no-wrap-grid">
@@ -113,15 +178,171 @@
         </div>
       </div>
 
+      <!-- Scramble Mode -->
+      <div v-else-if="mode === 'scramble'" class="text-center">
+        <div class="bg-white shadow rounded-lg p-3 border border-gray-200 font-mono text-lg tracking-wide break-words">
+          {{ scramble }}
+        </div>
+        <div class="mt-3 flex flex-wrap justify-center gap-2">
+          <button
+            @click="newScramble"
+            class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
+            🎲 New Scramble
+          </button>
+          <button
+            @click="showCube = !showCube"
+            class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded text-gray-800">
+            {{ showCube ? 'Hide Cube' : 'Show Cube' }}
+          </button>
+          <button
+            @click="view3d = !view3d"
+            class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded text-gray-800">
+            {{ view3d ? 'Net View' : '3D View' }}
+          </button>
+          <button
+            v-if="view3d"
+            @click="resetView"
+            class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded text-gray-800">
+            Reset Angle
+          </button>
+          <button
+            @click="showLetters = !showLetters"
+            :class="['px-4 py-2 rounded', showLetters ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800']">
+            Letters
+          </button>
+        </div>
+
+        <div
+          v-if="showCube && view3d"
+          class="cube-scene mt-2 mx-auto"
+          @pointerdown="dragStart"
+          @pointermove="dragMove"
+          @pointerup="dragEnd"
+          @pointercancel="dragEnd">
+          <div class="cube-3d" :style="{ transform: `rotateX(${rotX}deg) rotateY(${rotY}deg)` }">
+            <div
+              v-for="f in ['U', 'L', 'F', 'R', 'B', 'D']"
+              :key="f"
+              class="cube-3d-face"
+              :style="{ transform: face3d[f] }">
+              <div v-for="(c, i) in cubeFaces[f]" :key="i" class="sticker-label" :style="{ background: c }">{{ showLetters ? (slotLetter[f + i] || '') : '' }}</div>
+            </div>
+          </div>
+        </div>
+        <p v-if="showCube && view3d" class="text-xs text-gray-500">Drag to rotate</p>
+
+        <div v-if="showCube && !view3d" class="cube-net mt-5 mx-auto">
+          <div
+            v-for="f in ['U', 'L', 'F', 'R', 'B', 'D']"
+            :key="f"
+            class="cube-face"
+            :style="netPos[f]">
+            <div
+              v-for="(c, i) in cubeFaces[f]"
+              :key="i"
+              class="sticker sticker-label"
+              :style="{ background: c }">{{ showLetters ? (slotLetter[f + i] || '') : '' }}</div>
+          </div>
+        </div>
+
+        <div class="mt-6 flex gap-2 justify-center">
+          <input
+            v-model="customScramble"
+            @keyup.enter="applyCustomScramble"
+            class="flex-1 max-w-md p-2 border rounded font-mono text-sm"
+            placeholder="Or paste a scramble: R U R' U' ...">
+          <button
+            @click="applyCustomScramble"
+            class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded text-gray-800">
+            Apply
+          </button>
+        </div>
+        <p v-if="scrambleError" class="text-red-600 text-sm mt-2">{{ scrambleError }}</p>
+
+        <!-- Memo (Speffz, Old Pochmann) -->
+        <div class="mt-6 bg-white shadow rounded-lg p-4 border border-gray-200 text-left max-w-xl mx-auto">
+          <h2 class="font-bold">Your Memo</h2>
+          <p class="text-xs text-gray-500 mb-3">Speffz · Old Pochmann (edge buffer B = UR, corner buffer A = ULB)</p>
+
+          <label class="text-sm font-semibold">Edges</label>
+          <input
+            v-model="memoInput.edges"
+            @keyup.enter="checkMemo"
+            class="w-full p-2 border rounded font-mono tracking-wider uppercase mb-2"
+            placeholder="e.g. KQ DM EX ...">
+          <label class="text-sm font-semibold">Corners</label>
+          <input
+            v-model="memoInput.corners"
+            @keyup.enter="checkMemo"
+            class="w-full p-2 border rounded font-mono tracking-wider uppercase"
+            placeholder="e.g. CJ WN ...">
+
+          <div class="mt-3 flex gap-2">
+            <button
+              @click="checkMemo"
+              class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
+              Check
+            </button>
+            <button
+              @click="memoRevealed = !memoRevealed"
+              class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded text-gray-800">
+              {{ memoRevealed ? 'Hide Answer' : 'Show Answer' }}
+            </button>
+            <button
+              @click="autoFillMemo"
+              class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded text-gray-800">
+              Auto-fill
+            </button>
+          </div>
+          <button
+            @click="memorizeMemo"
+            class="w-full mt-3 bg-orange-600 text-white px-4 py-3 rounded hover:bg-orange-700 transition shadow-md">
+            🧠 Memorize these pairs
+          </button>
+          <p class="text-xs text-gray-500 mt-1">Uses what's typed above (or the correct memo if empty) → Study → Ready → Recall</p>
+
+          <div v-if="memoRevealed" class="mt-4 space-y-4">
+            <div v-for="part in ['edges', 'corners']" :key="part">
+              <div class="flex items-center gap-2 font-semibold capitalize">
+                {{ part }}
+                <span v-if="memoResult" :class="memoResult[part].ok ? 'text-green-600' : 'text-red-600'">
+                  {{ memoResult[part].ok ? '✅ correct' : '❌ wrong' }}
+                </span>
+                <span class="text-xs font-normal text-gray-500">({{ memo[part].length }} letters)</span>
+              </div>
+              <div v-if="memo[part].length === 0" class="text-sm text-gray-500">Already solved 🎉</div>
+              <div class="flex flex-wrap gap-2 mt-1">
+                <div
+                  v-for="(pair, i) in memoPairs(memo[part])"
+                  :key="i"
+                  class="rounded px-2 py-1 text-center border"
+                  :class="!memoResult ? 'bg-gray-100 border-transparent'
+                    : memoResult[part].typed[i] === pair ? 'bg-green-100 border-green-400 text-green-800'
+                    : 'bg-red-100 border-red-400 text-red-800'">
+                  <div class="font-mono font-bold tracking-widest">{{ pair }}</div>
+                  <div class="text-xs text-gray-600">{{ pairWord(pair) }}</div>
+                  <div
+                    v-if="memoResult && memoResult[part].typed[i] !== pair"
+                    class="text-xs font-mono font-semibold">you: {{ memoResult[part].typed[i] || '--' }}</div>
+                </div>
+              </div>
+            </div>
+            <p v-if="memo.edges.length % 2 === 1" class="text-sm text-orange-600 font-semibold">
+              ⚠️ Parity — odd number of edge targets, do the parity algorithm before corners.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Recall Mode -->
       <div v-else-if="mode === 'recall'" class="text-center">
         <textarea
           v-model="userInput"
           class="w-full h-24 p-3 border rounded mt-4 text-center text-lg tracking-wider"
-          placeholder="Type the 18-letter combined key like abcrgx..."
+          :placeholder="`Type the ${correctKeys.join('').length}-letter combined key like abcrgx...`"
         ></textarea>
 
-        <div class="mt-4 space-x-4">
+        <div class="mt-4 flex flex-wrap justify-center gap-3">
           <button
             v-if="result.length == 0"
             @click="check"
@@ -129,15 +350,40 @@
             Check
           </button>
 
+          <template v-if="memoSession && result.length > 0">
+            <button
+              @click="retryPhase"
+              class="bg-orange-600 text-white px-6 py-2 rounded hover:bg-orange-700 transition">
+              🔁 Retry {{ memoSession.phases[memoSession.index].name }}
+            </button>
+            <button
+              v-if="memoSession.index < memoSession.phases.length - 1"
+              @click="nextPhase"
+              class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">
+              Next: {{ memoSession.phases[memoSession.index + 1].name }} →
+            </button>
+            <button
+              v-else
+              @click="restartSession"
+              class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">
+              🔁 Start over (Edges)
+            </button>
+            <button
+              @click="mode = 'scramble'"
+              class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 transition">
+              Back to Scramble
+            </button>
+          </template>
+
           <button
-            v-if="result.length > 0"
+            v-if="result.length > 0 && !memoSession"
             @click="reset('study')"
             class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 transition">
             New Random
           </button>
 
           <button
-            v-if="result.length > 0"
+            v-if="result.length > 0 && !memoSession"
             @click="reset('self')"
             class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 transition">
             New Input
@@ -178,7 +424,7 @@
         const userInput = ref("");
         const result = ref([]);
         const mode = ref("study");
-        const modes = ref(['study', 'self', 'memory'])
+        const modes = ref(['study', 'self', 'memory', 'scramble'])
 
         const selfInput = ref("");
 
@@ -285,6 +531,7 @@
         };
 
         const pickRandomSet = (newMode) => {
+          memoSession.value = null;
           const selected = [];
           const used = new Set();
           while (selected.length < 9 && used.size < quizPairs.value.length) {
@@ -316,11 +563,14 @@
 
 
         const check = () => {
-          const input = userInput.value.trim().toLowerCase();
+          const input = userInput.value.toLowerCase().replace(/\s+/g, "");
+          // slice by each answer key's length so single-letter keys (odd memo) stay aligned
           const userKeys = [];
-          for (let i = 0; i < input.length; i += 2) {
-            userKeys.push(input.slice(i, i + 2));
-          }
+          let pos = 0;
+          correctKeys.value.forEach(k => {
+            userKeys.push(input.slice(pos, pos + k.length));
+            pos += k.length;
+          });
           result.value = correctKeys.value.map((correct, i) => ({
             actual: correct,
             user: userKeys[i] || "--",
@@ -337,6 +587,7 @@
         };
 
         const registerInput = () => {
+            memoSession.value = null;
             const input = selfInput.value.trim().toLowerCase();
             if (!input) return;
 
@@ -345,6 +596,11 @@
                 pairs.push(input.slice(i, i + 2));
             }
 
+            studyPairs(pairs);
+            selfInput.value = "";
+        };
+
+        const studyPairs = (pairs) => {
             const pairMap = {};
             quizPairs.value.forEach(item => {
                 pairMap[item.key] = item;
@@ -362,8 +618,8 @@
             currentSet.value = matched;
             correctKeys.value = currentSet.value.map(i => i.key);
             revealed.value = Array(currentSet.value.length).fill(false);
-
-            selfInput.value = "";
+            userInput.value = "";
+            result.value = [];
             mode.value = "study";
         };
 
@@ -373,6 +629,7 @@
         }
 
         const selectCategory = (key) => {
+            memoSession.value = null;
             currentSeletedKey.value = key;
             const category = keywordMap.value[key];
             if (!category) return;
@@ -396,6 +653,7 @@
         }
 
         const pickRandom24 = () => {
+            memoSession.value = null;
             const selected = [];
             const used = new Set();
             while (selected.length < 24 && used.size < quizPairs.value.length) {
@@ -415,8 +673,261 @@
 
 
 
+        // ---- Cube scramble ----
+        // Coordinates: x = R, y = U, z = F. Each sticker = cubie position + outward normal.
+        // Colors: white top, green front (WCA orientation).
+        const FACES = {
+          U: { n: [0, 1, 0],  r: [1, 0, 0],  d: [0, 0, 1],  color: '#ffffff' },
+          D: { n: [0, -1, 0], r: [1, 0, 0],  d: [0, 0, -1], color: '#ffd500' },
+          F: { n: [0, 0, 1],  r: [1, 0, 0],  d: [0, -1, 0], color: '#009b48' },
+          B: { n: [0, 0, -1], r: [-1, 0, 0], d: [0, -1, 0], color: '#0046ad' },
+          R: { n: [1, 0, 0],  r: [0, 0, -1], d: [0, -1, 0], color: '#b71234' },
+          L: { n: [-1, 0, 0], r: [0, 0, 1],  d: [0, -1, 0], color: '#ff5800' },
+        };
+        const AXIS = { U: 'y', D: 'y', R: 'x', L: 'x', F: 'z', B: 'z' };
+
+        const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        const faceletPos = (f, row, col) =>
+          [0, 1, 2].map(k => f.n[k] + f.r[k] * (col - 1) + f.d[k] * (row - 1));
+
+        const solvedStickers = () => {
+          const list = [];
+          for (const name in FACES) {
+            const f = FACES[name];
+            for (let i = 0; i < 9; i++) {
+              list.push({ pos: faceletPos(f, Math.floor(i / 3), i % 3), n: [...f.n], color: f.color, home: name + i });
+            }
+          }
+          return list;
+        };
+
+        // Clockwise quarter turn (looking at the face) = -90° about its outward normal a:
+        // v' = a(a·v) - a×v
+        const turn = (stickers, face, times) => {
+          const a = FACES[face].n;
+          const rot = v => { const c = cross(a, v), k = dot(a, v); return [0, 1, 2].map(i => a[i] * k - c[i]); };
+          for (let t = 0; t < times; t++) {
+            stickers.forEach(s => {
+              if (dot(s.pos, a) === 1) { s.pos = rot(s.pos); s.n = rot(s.n); }
+            });
+          }
+        };
+
+        const stickersToFaces = (stickers) => {
+          const lookup = {};
+          stickers.forEach(s => { lookup[s.pos.join() + '|' + s.n.join()] = s.color; });
+          const out = {};
+          for (const name in FACES) {
+            const f = FACES[name];
+            out[name] = Array.from({ length: 9 }, (_, i) =>
+              lookup[faceletPos(f, Math.floor(i / 3), i % 3).join() + '|' + f.n.join()]);
+          }
+          return out;
+        };
+
+        const parseMoves = (text) => {
+          const tokens = text.trim().split(/\s+/).filter(Boolean);
+          return tokens.map(tok => {
+            const m = tok.match(/^([URFDLB])(2|'|’)?$/);
+            if (!m) throw new Error(`Unknown move: ${tok}`);
+            return { face: m[1], times: m[2] === '2' ? 2 : m[2] ? 3 : 1 };
+          });
+        };
+
+        const randomScramble = (length = 20) => {
+          const faces = Object.keys(FACES);
+          const suffixes = ['', "'", '2'];
+          const moves = [];
+          while (moves.length < length) {
+            const face = faces[Math.floor(Math.random() * 6)];
+            const last = moves[moves.length - 1];
+            const prev = moves[moves.length - 2];
+            if (last && last.face === face) continue;
+            // avoid e.g. "R L R" (same axis three in a row)
+            if (last && prev && AXIS[last.face] === AXIS[face] && AXIS[prev.face] === AXIS[face]) continue;
+            moves.push({ face, suffix: suffixes[Math.floor(Math.random() * 3)] });
+          }
+          return moves.map(m => m.face + m.suffix).join(' ');
+        };
+
+        const scramble = ref("");
+        const cubeFaces = ref(stickersToFaces(solvedStickers()));
+        const showCube = ref(true);
+        const customScramble = ref("");
+        const scrambleError = ref("");
+        const netPos = {
+          U: { gridColumn: 2, gridRow: 1 },
+          L: { gridColumn: 1, gridRow: 2 },
+          F: { gridColumn: 2, gridRow: 2 },
+          R: { gridColumn: 3, gridRow: 2 },
+          B: { gridColumn: 4, gridRow: 2 },
+          D: { gridColumn: 2, gridRow: 3 },
+        };
+
+        // 3D view (CSS transforms, drag to rotate)
+        const view3d = ref(true);
+        const DEFAULT_ROT = { x: -28, y: -38 };
+        const rotX = ref(DEFAULT_ROT.x);
+        const rotY = ref(DEFAULT_ROT.y);
+        const half = 'calc(var(--c) / 2)';
+        const face3d = {
+          F: `translateZ(${half})`,
+          R: `rotateY(90deg) translateZ(${half})`,
+          B: `rotateY(180deg) translateZ(${half})`,
+          L: `rotateY(-90deg) translateZ(${half})`,
+          U: `rotateX(90deg) translateZ(${half})`,
+          D: `rotateX(-90deg) translateZ(${half})`,
+        };
+        let drag = null;
+        const dragStart = (e) => {
+          drag = { x: e.clientX, y: e.clientY };
+          e.currentTarget.setPointerCapture(e.pointerId);
+        };
+        const dragMove = (e) => {
+          if (!drag) return;
+          rotY.value += (e.clientX - drag.x) * 0.5;
+          rotX.value = Math.max(-90, Math.min(90, rotX.value - (e.clientY - drag.y) * 0.5));
+          drag = { x: e.clientX, y: e.clientY };
+        };
+        const dragEnd = () => { drag = null; };
+        const resetView = () => { rotX.value = DEFAULT_ROT.x; rotY.value = DEFAULT_ROT.y; };
+
+        // ---- Speffz memo tracing (Old Pochmann) ----
+        // Letters go clockwise from the top-left of each face in net orientation: U, L, F, R, B, D.
+        const SPEFFZ_FACES = ['U', 'L', 'F', 'R', 'B', 'D'];
+        const CORNER_IDX = [0, 2, 8, 6];
+        const EDGE_IDX = [1, 5, 7, 3];
+        const slotLetter = {};
+        SPEFFZ_FACES.forEach((f, fi) => {
+          CORNER_IDX.forEach((idx, k) => { slotLetter[f + idx] = String.fromCharCode(65 + fi * 4 + k); });
+          EDGE_IDX.forEach((idx, k) => { slotLetter[f + idx] = String.fromCharCode(65 + fi * 4 + k); });
+        });
+
+        const traceMemo = (stickers, idxList, buffer) => {
+          const homeAt = {};
+          stickers.forEach(s => { homeAt[s.pos.join() + '|' + s.n.join()] = s.home; });
+          const cur = {};   // slot letter -> letter of the sticker currently sitting there
+          const piece = {}; // slot letter -> piece id (cubie position)
+          SPEFFZ_FACES.forEach(f => idxList.forEach(i => {
+            const fd = FACES[f];
+            const pos = faceletPos(fd, Math.floor(i / 3), i % 3);
+            const L = slotLetter[f + i];
+            cur[L] = slotLetter[homeAt[pos.join() + '|' + fd.n.join()]];
+            piece[L] = pos.join();
+          }));
+          const letters = Object.keys(cur).sort();
+          const isSolved = p => letters.every(L => piece[L] !== p || cur[L] === L);
+
+          const memo = [];
+          const done = new Set([piece[buffer]]);
+          let s = cur[buffer];
+          while (piece[s] !== piece[buffer]) { memo.push(s); done.add(piece[s]); s = cur[s]; }
+
+          // cycle breaks: new cycle starts at the first unsolved piece, closes back on that piece
+          for (const L of letters) {
+            const p = piece[L];
+            if (done.has(p) || isSolved(p)) continue;
+            done.add(p);
+            memo.push(L);
+            s = cur[L];
+            while (piece[s] !== p) { memo.push(s); done.add(piece[s]); s = cur[s]; }
+            memo.push(s);
+          }
+          return memo;
+        };
+
+        const memo = ref({ edges: [], corners: [] });
+        const memoInput = ref({ edges: "", corners: "" });
+        const memoRevealed = ref(false);
+        const memoResult = ref(null);
+        const showLetters = ref(false);
+        const memoSession = ref(null); // { phases: [{ name, pairs }], index }
+
+        const memoPairs = (letters) => {
+          const out = [];
+          for (let i = 0; i < letters.length; i += 2) out.push(letters.slice(i, i + 2).join(''));
+          return out;
+        };
+
+        const pairWord = (pair) => {
+          if (pair.length < 2) return '';
+          const hit = quizPairs.value.find(p => p.key === pair.toLowerCase());
+          return hit ? hit.value : '';
+        };
+
+        const checkMemo = () => {
+          const norm = v => v.toUpperCase().replace(/[^A-X]/g, '');
+          const grade = (typed, answer) => ({
+            ok: norm(typed) === answer.join(''),
+            typed: memoPairs(norm(typed).split('')),
+          });
+          memoResult.value = {
+            edges: grade(memoInput.value.edges, memo.value.edges),
+            corners: grade(memoInput.value.corners, memo.value.corners),
+          };
+          memoRevealed.value = true;
+        };
+
+        const autoFillMemo = () => {
+          memoInput.value = {
+            edges: memoPairs(memo.value.edges).join(' '),
+            corners: memoPairs(memo.value.corners).join(' '),
+          };
+        };
+
+        const memorizeMemo = () => {
+          const lettersOf = (typed, fallback) => {
+            const clean = typed.toUpperCase().replace(/[^A-X]/g, '');
+            return clean ? clean.split('') : fallback;
+          };
+          const toPairs = letters => memoPairs(letters).map(p => p.toLowerCase());
+          const phases = [
+            { name: 'Edges', pairs: toPairs(lettersOf(memoInput.value.edges, memo.value.edges)) },
+            { name: 'Corners', pairs: toPairs(lettersOf(memoInput.value.corners, memo.value.corners)) },
+          ].filter(p => p.pairs.length > 0);
+          if (phases.length === 0) return;
+          memoSession.value = { phases, index: 0 };
+          studyPairs(phases[0].pairs);
+        };
+
+        const startPhase = (index) => {
+          memoSession.value.index = index;
+          studyPairs(memoSession.value.phases[index].pairs);
+        };
+        const retryPhase = () => startPhase(memoSession.value.index);
+        const nextPhase = () => startPhase(memoSession.value.index + 1);
+        const restartSession = () => startPhase(0);
+
+        const applyScramble = (text) => {
+          const stickers = solvedStickers();
+          parseMoves(text).forEach(m => turn(stickers, m.face, m.times));
+          cubeFaces.value = stickersToFaces(stickers);
+          memo.value = {
+            edges: traceMemo(stickers, EDGE_IDX, 'B'),
+            corners: traceMemo(stickers, CORNER_IDX, 'A'),
+          };
+          memoInput.value = { edges: "", corners: "" };
+          memoRevealed.value = false;
+          memoResult.value = null;
+          scramble.value = text.trim().replace(/’/g, "'");
+          scrambleError.value = "";
+        };
+
+        const newScramble = () => applyScramble(randomScramble());
+
+        const applyCustomScramble = () => {
+          try {
+            applyScramble(customScramble.value);
+            customScramble.value = "";
+          } catch (e) {
+            scrambleError.value = e.message;
+          }
+        };
+
         onMounted(() => {
           fetchKeywordMap();
+          newScramble();
         });
 
         return {
@@ -442,7 +953,42 @@
           keywordMap,
           currentSeletedKey,
           selectCategory,
-          pickRandom24
+          pickRandom24,
+
+          scramble,
+          cubeFaces,
+          showCube,
+          netPos,
+          newScramble,
+          customScramble,
+          applyCustomScramble,
+          scrambleError,
+
+          view3d,
+          rotX,
+          rotY,
+          face3d,
+          dragStart,
+          dragMove,
+          dragEnd,
+          resetView,
+
+          slotLetter,
+          showLetters,
+          memo,
+          memoInput,
+          memoRevealed,
+          memoResult,
+          memoPairs,
+          pairWord,
+          checkMemo,
+          autoFillMemo,
+          memorizeMemo,
+          correctKeys,
+          memoSession,
+          retryPhase,
+          nextPhase,
+          restartSession
         };
       }
     }).mount("#app");
